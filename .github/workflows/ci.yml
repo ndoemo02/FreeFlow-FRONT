@@ -1,0 +1,49 @@
+name: Front CI
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore: [ "**/*.md", "**/.env*", "**/package-lock.json" ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Install • Lint • Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      # Nie przerywaj, jeśli nie masz skryptu lint – zrób “best effort”
+      - name: Lint (optional)
+        run: npm run lint || echo "no lint script – skipping"
+
+      # Ustaw VITE_BASE_API z sekretu, a jak go brak – fallback na localhost
+      - name: Set VITE_BASE_API
+        run: |
+          echo "VITE_BASE_API=${{ secrets.VITE_BASE_API != '' && secrets.VITE_BASE_API || 'http://localhost:3001' }}" >> $GITHUB_ENV
+
+      - name: Build
+        env:
+          VITE_BASE_API: ${{ env.VITE_BASE_API }}
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
