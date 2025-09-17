@@ -1,0 +1,27 @@
+name: Health Check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *" # co 30 min
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping STG
+        if: ${{ secrets.STG_HEALTH_URL != '' }}
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.STG_HEALTH_URL }}")
+          echo "STG status: $code"
+          [ "$code" -ge 200 ] && [ "$code" -lt 400 ]
+
+      - name: Ping PROD
+        if: ${{ secrets.PROD_HEALTH_URL != '' }}
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.PROD_HEALTH_URL }}")
+          echo "PROD status: $code"
+          [ "$code" -ge 200 ] && [ "$code" -lt 400 ]
