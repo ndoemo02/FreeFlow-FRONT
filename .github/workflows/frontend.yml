@@ -1,0 +1,41 @@
+name: frontend-ci
+
+on:
+  pull_request:
+    paths:
+      - 'freeflow-frontend/**'
+      - '.github/workflows/frontend.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'freeflow-frontend/**'
+      - '.github/workflows/frontend.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: freeflow-frontend
+    env:
+      VITE_BASE_API: ${{ secrets.VITE_BASE_API || 'http://localhost:3001' }}
+      VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: freeflow-frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint (optional)
+        run: npm run lint --if-present
+
+      - name: Build
+        run: npm run build
