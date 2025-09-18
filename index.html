@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="pl">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>FreeFlow — Voice to Order</title>
+  <meta name="description" content="Zamów głosem - restauracje, taxi, hotele" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#ff8a30" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FreeFlow" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json" />
+  
+  <!-- Icons -->
+  <link rel="icon" type="image/png" href="images/Freeflow-logo.png" />
+  <link rel="apple-touch-icon" href="images/Freeflowlogo.png" />
+  
+  <!-- Preload critical resources -->
+  <link rel="preload" href="images/Background.png" as="image" />
+  <link rel="preload" href="images/Freeflowlogo.png" as="image" />
+  <script type="module" crossorigin src="assets/index-CHbNu_13.js"></script>
+  <link rel="stylesheet" crossorigin href="assets/index-i4BUNEdS.css">
+</head>
+
+<body>
+  <div id="root"></div>
+  
+  <script>
+    // TTS Interceptor i Text Cleanup
+    (function() {
+      let currentAudio = null;
+      
+      // Czyści tekst przed wysłaniem do TTS
+      function cleanTextForTTS(text) {
+        if (!text || typeof text !== 'string') return text;
+        
+        return text
+          // Zamieniaj cyfry na słowa
+          .replace(/\b4\b/g, 'cztery')
+          .replace(/\b9\b/g, 'dziewięć')
+          .replace(/\b0\b/g, 'zero')
+          .replace(/\b1\b/g, 'jeden')
+          .replace(/\b2\b/g, 'dwa')
+          .replace(/\b3\b/g, 'trzy')
+          .replace(/\b5\b/g, 'pięć')
+          .replace(/\b6\b/g, 'sześć')
+          .replace(/\b7\b/g, 'siedem')
+          .replace(/\b8\b/g, 'osiem')
+          // Usuń gwiazdki i inne problematyczne znaki
+          .replace(/\*/g, '')
+          .replace(/[\*]+/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+      
+      // Zatrzymuje aktualnie odtwarzane audio
+      function stopCurrentAudio() {
+        if (currentAudio) {
+          try {
+            currentAudio.pause();
+            currentAudio.currentTime = 0;
+          } catch (e) {
+            console.log('Nie można zatrzymać audio:', e);
+          }
+          currentAudio = null;
+        }
+      }
+      
+      // Przechwytuje wywołania Audio
+      const OriginalAudio = window.Audio;
+      window.Audio = function(src) {
+        stopCurrentAudio();
+        const audio = new OriginalAudio(src);
+        currentAudio = audio;
+        return audio;
+      };
+      
+      // Przechwytuje fetch dla OpenAI TTS
+      const originalFetch = window.fetch;
+      window.fetch = function(...args) {
+        const [url, options] = args;
+        
+        // Sprawdź czy to może być wywołanie TTS
+        if (url && typeof url === 'string' && 
+            (url.includes('openai') || url.includes('speech') || url.includes('tts'))) {
+          
+          if (options && options.body) {
+            try {
+              let body = options.body;
+              if (typeof body === 'string') {
+                const data = JSON.parse(body);
+                if (data.input || data.text) {
+                  // Zatrzymaj aktualny dźwięk
+                  stopCurrentAudio();
+                  
+                  // Wyczyść tekst
+                  if (data.input) {
+                    data.input = cleanTextForTTS(data.input);
+                  }
+                  if (data.text) {
+                    data.text = cleanTextForTTS(data.text);
+                  }
+                  
+                  options.body = JSON.stringify(data);
+                  console.log('TTS tekst wyczyszczony:', data.input || data.text);
+                }
+              }
+            } catch (e) {
+              console.log('Nie udało się przetworzyć TTS request:', e);
+            }
+          }
+        }
+        
+        return originalFetch.apply(this, args);
+      };
+      
+      // Przechwytuje createObjectURL dla audio blob
+      const originalCreateObjectURL = URL.createObjectURL;
+      URL.createObjectURL = function(blob) {
+        if (blob && blob.type && blob.type.startsWith('audio/')) {
+          stopCurrentAudio();
+        }
+        return originalCreateObjectURL.apply(this, arguments);
+      };
+      
+      console.log('TTS Interceptor załadowany - cyfry i gwiazdki będą filtrowane, audio zsynchronizowane');
+    })();
+  </script>
+  
+</body>
+</html>
