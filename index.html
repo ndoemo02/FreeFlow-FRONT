@@ -131,6 +131,64 @@
       console.log('TTS Interceptor załadowany - cyfry i gwiazdki będą filtrowane, audio zsynchronizowane');
     })();
   </script>
+
+<script>
+(() => {
+  const BACK_URL = "https://github.com/ndoemo02/FreeFlow-FRONT/new/main"; // <--- PODMIEŃ
+  const ENDPOINTS = { health:"/api/healthz", diag:"/api/diag", selftest:"/api/selftest", version:"/api/version", time:"/api/time" };
+
+  const jfetch = async (url, timeout=8000) => {
+    const ctrl = new AbortController(), to = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const r = await fetch(url, {signal: ctrl.signal});
+      const t = await r.text(); let d; try{ d=JSON.parse(t);}catch{ d=t;}
+      return { ok:r.ok, status:r.status, data:d };
+    } catch(e){ return { ok:false, status:0, data:{error:e.name==="AbortError"?"timeout":e.message} }; }
+    finally{ clearTimeout(to); }
+  };
+
+  const badge = document.createElement("button");
+  Object.assign(badge.style, {position:"fixed", right:"12px", bottom:"12px", zIndex:9999,
+    background:"#111827", color:"#fff", border:"1px solid #374151", borderRadius:"9999px",
+    padding:"8px 12px", display:"flex", gap:"8px", alignItems:"center", boxShadow:"0 6px 20px rgba(0,0,0,.25)"});
+  const dot = document.createElement("span");
+  Object.assign(dot.style,{width:"10px", height:"10px", borderRadius:"9999px", background:"#9ca3af"});
+  const label = document.createElement("span"); label.textContent="DrWeb"; label.style.fontSize="12px"; label.style.opacity=".9";
+  badge.append(dot, label); document.body.appendChild(badge);
+
+  const panel = document.createElement("div");
+  Object.assign(panel.style,{position:"fixed", right:"12px", bottom:"56px", zIndex:9999, width:"min(92vw,520px)", maxHeight:"70vh",
+    overflow:"auto", background:"#0b1220", color:"#fff", border:"1px solid #243046", borderRadius:"12px", padding:"12px",
+    boxShadow:"0 12px 32px rgba(0,0,0,.35)", display:"none"});
+  const header = document.createElement("div"); Object.assign(header.style,{display:"flex", justifyContent:"space-between", marginBottom:"8px"});
+  header.innerHTML = `<div style="font-weight:600">DrWeb – diagnostyka</div>
+  <div style="display:flex; gap:8px">
+    <button id="drw-run" style="padding:6px 10px;border-radius:8px;background:#1f2937;color:#e5e7eb;border:1px solid #374151">Uruchom testy</button>
+    <button id="drw-copy" style="padding:6px 10px;border-radius:8px;background:#1f2937;color:#e5e7eb;border:1px solid #374151">Kopiuj raport</button>
+  </div>`;
+  const pre = document.createElement("pre"); Object.assign(pre.style,{whiteSpace:"pre-wrap", background:"#0f172a", padding:"8px", borderRadius:"8px", fontSize:"12px", lineHeight:"1.35"});
+  panel.append(header, pre); document.body.appendChild(panel);
+
+  let report = null, busy=false;
+
+  async function run() {
+    if (!BACK_URL || busy) return;
+    busy=true; const started=new Date().toISOString();
+    const base = BACK_URL.replace(/\/+$/,"");
+    const out = {};
+    for (const [k,p] of Object.entries(ENDPOINTS)) out[k] = await jfetch(base + p);
+    const ok = out.health?.ok && out.diag?.ok && out.selftest?.ok;
+    report = { started, finished:new Date().toISOString(), frontendOrigin:location.origin, backendBase:base, verdict: ok?"OK":"FAIL", results: out };
+    pre.textContent = JSON.stringify(report,null,2);
+    dot.style.background = ok ? "#16a34a" : "#dc2626";
+    busy=false;
+  }
+
+  badge.onclick = () => { panel.style.display = panel.style.display==="none" ? "block" : "none"; if (!report) run(); };
+  panel.querySelector("#drw-run").onclick = run;
+  panel.querySelector("#drw-copy").onclick = () => report && navigator.clipboard?.writeText(JSON.stringify(report,null,2));
+})();
+        </script>
   
 </body>
 </html>
