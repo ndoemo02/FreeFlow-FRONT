@@ -34,11 +34,12 @@
     // TTS Interceptor i Text Cleanup
     (function() {
       let currentAudio = null;
-      
+      let playbackChain = Promise.resolve();
+
       // Czyści tekst przed wysłaniem do TTS
       function cleanTextForTTS(text) {
         if (!text || typeof text !== 'string') return text;
-        
+
         return text
           // Zamieniaj cyfry na słowa
           .replace(/\b4\b/g, 'cztery')
@@ -57,9 +58,9 @@
           .replace(/\s+/g, ' ')
           .trim();
       }
-      
-      // Zatrzymuje aktualnie odtwarzane audio
-      function stopCurrentAudio() {
+
+      // Zatrzymuje aktualnie odtwarzane audio i czyści kolejkę (opcjonalnie)
+      function stopCurrentAudio({ resetQueue = true } = {}) {
         if (currentAudio) {
           try {
             currentAudio.pause();
@@ -69,66 +70,146 @@
           }
           currentAudio = null;
         }
+        if (resetQueue) {
+          playbackChain = Promise.resolve();
+        }
       }
-      
-      // Przechwytuje wywołania Audio
+
+      function waitForTurn(nextAudio) {
+        const active = currentAudio;
+        if (!active || active === nextAudio || active.paused || active.ended) {
+          return Promise.resolve();
+        }
+
+        return new Promise((resolve) => {
+          const cleanup = () => {
+            active.removeEventListener('ended', release);
+            active.removeEventListener('error', release);
+            active.removeEventListener('abort', release);
+            active.removeEventListener('pause', onPause);
+          };
+
+          const release = () => {
+            cleanup();
+            resolve();
+          };
+
+          const onPause = () => {
+            cleanup();
+            resolve();
+          };
+
+          active.addEventListener('ended', release, { once: true });
+          active.addEventListener('error', release, { once: true });
+          active.addEventListener('abort', release, { once: true });
+          active.addEventListener('pause', onPause, { once: true });
+        });
+      }
+
+      function prepareAudioInstance(audio) {
+        if (!audio || typeof audio.play !== 'function') return;
+
+        const releaseCurrent = () => {
+          if (currentAudio === audio) {
+            currentAudio = null;
+          }
+        };
+
+        const handlePause = () => {
+          if (audio.ended || audio.currentTime === 0 || audio.paused) {
+            releaseCurrent();
+          }
+        };
+
+        audio.addEventListener('ended', releaseCurrent);
+        audio.addEventListener('error', releaseCurrent);
+        audio.addEventListener('abort', releaseCurrent);
+        audio.addEventListener('pause', handlePause);
+
+        const originalPlay = audio.play.bind(audio);
+
+        audio.play = () => {
+          const playSequence = () =>
+            waitForTurn(audio)
+              .then(() => {
+                currentAudio = audio;
+                return originalPlay();
+              })
+              .catch((err) => {
+                releaseCurrent();
+                throw err;
+              });
+
+          playbackChain = playbackChain
+            .catch(() => {})
+            .then(playSequence);
+
+          return playbackChain.catch((err) => {
+            releaseCurrent();
+            return Promise.reject(err);
+          });
+        };
+      }
+
+      // Przechwytuje wywołania Audio i dodaje kolejkowanie odtwarzania
       const OriginalAudio = window.Audio;
-      window.Audio = function(src) {
-        stopCurrentAudio();
-        const audio = new OriginalAudio(src);
-        currentAudio = audio;
-        return audio;
-      };
-      
+      if (OriginalAudio) {
+        window.Audio = function(src) {
+          const audio = src ? new OriginalAudio(src) : new OriginalAudio();
+          prepareAudioInstance(audio);
+          return audio;
+        };
+        window.Audio.prototype = OriginalAudio.prototype;
+        Object.setPrototypeOf(window.Audio, OriginalAudio);
+      }
+
       // Przechwytuje fetch dla OpenAI TTS
       const originalFetch = window.fetch;
       window.fetch = function(...args) {
         const [url, options] = args;
-        
+
         // Sprawdź czy to może być wywołanie TTS
-        if (url && typeof url === 'string' && 
+        if (url && typeof url === 'string' &&
             (url.includes('openai') || url.includes('speech') || url.includes('tts'))) {
-          
+
           if (options && options.body) {
             try {
-              let body = options.body;
+              const body = options.body;
               if (typeof body === 'string') {
                 const data = JSON.parse(body);
-                if (data.input || data.text) {
-                  // Zatrzymaj aktualny dźwięk
-                  stopCurrentAudio();
-                  
-                  // Wyczyść tekst
-                  if (data.input) {
-                    data.input = cleanTextForTTS(data.input);
-                  }
-                  if (data.text) {
-                    data.text = cleanTextForTTS(data.text);
-                  }
-                  
-                  options.body = JSON.stringify(data);
-                  console.log('TTS tekst wyczyszczony:', data.input || data.text);
+                let shouldInterrupt = false;
+
+                if (data.input) {
+                  data.input = cleanTextForTTS(data.input);
                 }
+                if (data.text) {
+                  data.text = cleanTextForTTS(data.text);
+                }
+
+                if (data.metadata && (data.metadata.interrupt || data.metadata.flushAudioQueue)) {
+                  shouldInterrupt = true;
+                }
+                if (data.interrupt || data.stopCurrentAudio) {
+                  shouldInterrupt = true;
+                }
+
+                if (shouldInterrupt) {
+                  stopCurrentAudio();
+                }
+
+                options.body = JSON.stringify(data);
+                console.log('TTS tekst wyczyszczony:', data.input || data.text);
               }
             } catch (e) {
               console.log('Nie udało się przetworzyć TTS request:', e);
             }
           }
         }
-        
+
         return originalFetch.apply(this, args);
       };
-      
-      // Przechwytuje createObjectURL dla audio blob
-      const originalCreateObjectURL = URL.createObjectURL;
-      URL.createObjectURL = function(blob) {
-        if (blob && blob.type && blob.type.startsWith('audio/')) {
-          stopCurrentAudio();
-        }
-        return originalCreateObjectURL.apply(this, arguments);
-      };
-      
-      console.log('TTS Interceptor załadowany - cyfry i gwiazdki będą filtrowane, audio zsynchronizowane');
+
+      console.log('TTS Interceptor załadowany - kolejka audio aktywna, cyfry i gwiazdki będą filtrowane');
     })();
   </script>
 
