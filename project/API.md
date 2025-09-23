@@ -1,0 +1,1 @@
+klucze endpointy schemat odpowiedzi
