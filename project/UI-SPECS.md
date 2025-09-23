@@ -1,0 +1,1 @@
+zrzuty ekranu, kolory, wygląd
